@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import DBFS, { DocumentEntry, DocumentStat } from "./index.js"
+import { suite, it, beforeEach, afterEach } from "node:test"
+import assert from "node:assert/strict"
 import { stdout } from "node:process"
+import DBFS, { DocumentEntry, DocumentStat } from "./index.js"
 
-describe("DBFS tests", () => {
+suite("findStream()", () => {
 	/** @type {DBFS} */
 	let db
 	/** @type {DocumentEntry[]} */
@@ -51,14 +52,14 @@ describe("DBFS tests", () => {
 		]
 		memoryFS = createMemoryFS()
 
-		db.ensureAccess = vi.fn(async (uri, level) => {
+		db.ensureAccess = async (uri, level) => {
 			if (uri.startsWith("../")) {
 				throw new Error("No access outside of the db container")
 			}
 			return true
-		})
-		db.resolve = vi.fn(async (uri) => uri)
-		db.relative = vi.fn((from, to) => to.startsWith(from) ? to.slice(from.length) : to)
+		}
+		db.resolve = async (uri) => uri
+		db.relative = (from, to) => to.startsWith(from) ? to.slice(from.length) : to
 		db.statDocument = async (uri) => {
 			if (!memoryFS.existsSync(uri)) return { mtime: 0, mtimeMs: 0 }
 			return memoryFS.statSync(uri)
@@ -87,20 +88,20 @@ describe("DBFS tests", () => {
 			return false
 		}
 
-		db.readDir = vi.fn(async function* () {
+		db.readDir = async function* () {
 			for (const f of files) {
 				yield f
 			}
-		})
-		db.connect = vi.fn(async () => {
+		}
+		db.connect = async () => {
 			db.connected = true
-		})
-		db.disconnect = vi.fn(async () => {
+		}
+		db.disconnect = async () => {
 			db.connected = false
-		})
+		}
 
 		originalStdoutWrite = stdout.write
-		stdout.write = vi.fn()
+		stdout.write = () => true
 	})
 
 	afterEach(() => {
@@ -108,168 +109,161 @@ describe("DBFS tests", () => {
 		memoryFS.clear()
 	})
 
-	describe("findStream", () => {
-		it.skip("should yield files with correct progress and sorting by name asc", async () => {
-			let entries = [
-				new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 10, mtimeMs: 1000, isFile: true }), depth: 0 }),
-				new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 20, mtimeMs: 2000, isFile: true }), depth: 0 }),
-				new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 30, mtimeMs: 3000, isFile: true }), depth: 0 }),
-				new DocumentEntry({ name: "dir", stat: new DocumentStat({ size: 30, mtimeMs: 3000, isDirectory: true }), depth: 0 }),
-				new DocumentEntry({ name: "dir/file3.txt", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 1 }),
-				new DocumentEntry({ name: "dir/inc", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isDirectory: true }), depth: 1 }),
-				new DocumentEntry({ name: "dir/inc/index.js", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 2 }),
-				new DocumentEntry({ name: "dir/src", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isDirectory: true }), depth: 1 }),
-				new DocumentEntry({ name: "dir/src/a.js", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 2, error: new Error("stat error") }),
-				new DocumentEntry({ name: "dir/src/b.js", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 2 }),
-			]
-			// @todo write comment to ignore prettier alignment inside the block -------------------------------------
-			const expected = [
-				// [file, dirs.size, top.size, totalSize, errors, progress], // pos, name > depth
-				[entries[3], 1, 1, { dirs: 30, files: 0 }, 0, 0],     // 0.   dir               > 0
-				[entries[0], 1, 1, { dirs: 30, files: 10 }, 0, 0],    // 1.   a.txt             > 0
-				[entries[1], 1, 1, { dirs: 30, files: 30 }, 0, 0],    // 3.   b.txt             > 0
-				[entries[2], 1, 1, { dirs: 30, files: 60 }, 0, 0],    // 2.   c.txt             > 0
-				[entries[5], 2, 1, { dirs: 60, files: 60 }, 0, 0],  // 4.   dir/inc           > 1
-				[entries[7], 3, 1, { dirs: 90, files: 60 }, 0, 0],  // 5.   dir/src           > 1
-				[entries[4], 3, 1, { dirs: 90, files: 90 }, 0, 0],  // 6.   dir/file3.txt     > 1
-				[entries[6], 3, 1, { dirs: 90, files: 120 }, 0, 0.3], // 7.   dir/inc/index.js  > 2
-				[entries[8], 3, 1, { dirs: 90, files: 150 }, 0, 0.3], // 8.   dir/src/a.js      > 2
-				[entries[9], 3, 1, { dirs: 90, files: 180 }, 0, 0.3], // 9.   dir/src/b.js      > 2
-			]
-			// ----- write comment to ignore prettier alignment inside the block -------------------------------------
-			db.readDir = vi.fn(async function* () {
-				const sorted = entries
-					.sort((a, b) => {
-						if (a.depth === b.depth) {
-							if (a.isDirectory && !b.isDirectory) return -1
-							if (!a.isDirectory && b.isDirectory) return 1
-						}
-						return a.depth - b.depth
-					})
-				// .sort((a, b) => {
-				// 	return a.isDirectory ? -1 : 1
-				// })
-				// .sort((a, b) => a.name.localeCompare(b.name))
-				const later = []
-				for (const entry of sorted) {
-					yield entry
-				}
-			})
-
-			const files = []
-			let i = 0
-			for await (const entry of db.findStream(".", { limit: -1, sort: "name", order: "asc" })) {
-				files.push(entry)
-				const exp = expected[i++]
-				expect(entry.file).toEqual(exp[0])
-				expect(entry.dirs.size).toEqual(exp[1])
-				expect(entry.top.size).toEqual(exp[2])
-				expect(entry.totalSize).toEqual(exp[3])
-				expect(entry.errors.size).toEqual(exp[4])
-				expect(entry.progress).toBeCloseTo(exp[5], 1)
+	it.skip("should yield files with correct progress and sorting by name asc", async () => {
+		let entries = [
+			new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 10, mtimeMs: 1000, isFile: true }), depth: 0 }),
+			new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 20, mtimeMs: 2000, isFile: true }), depth: 0 }),
+			new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 30, mtimeMs: 3000, isFile: true }), depth: 0 }),
+			new DocumentEntry({ name: "dir", stat: new DocumentStat({ size: 30, mtimeMs: 3000, isDirectory: true }), depth: 0 }),
+			new DocumentEntry({ name: "dir/file3.txt", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 1 }),
+			new DocumentEntry({ name: "dir/inc", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isDirectory: true }), depth: 1 }),
+			new DocumentEntry({ name: "dir/inc/index.js", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 2 }),
+			new DocumentEntry({ name: "dir/src", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isDirectory: true }), depth: 1 }),
+			new DocumentEntry({ name: "dir/src/a.js", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 2, error: new Error("stat error") }),
+			new DocumentEntry({ name: "dir/src/b.js", stat: new DocumentStat({ size: 30, mtimeMs: 4000, isFile: true }), depth: 2 }),
+		]
+		// @todo write comment to ignore prettier alignment inside the block -------------------------------------
+		const expected = [
+			// [file, dirs.size, top.size, totalSize, errors, progress], // pos, name > depth
+			[entries[3], 1, 1, { dirs: 30, files: 0 }, 0, 0],     // 0.   dir               > 0
+			[entries[0], 1, 1, { dirs: 30, files: 10 }, 0, 0],    // 1.   a.txt             > 0
+			[entries[1], 1, 1, { dirs: 30, files: 30 }, 0, 0],    // 3.   b.txt             > 0
+			[entries[2], 1, 1, { dirs: 30, files: 60 }, 0, 0],    // 2.   c.txt             > 0
+			[entries[5], 2, 1, { dirs: 60, files: 60 }, 0, 0],  // 4.   dir/inc           > 1
+			[entries[7], 3, 1, { dirs: 90, files: 60 }, 0, 0],  // 5.   dir/src           > 1
+			[entries[4], 3, 1, { dirs: 90, files: 90 }, 0, 0],  // 6.   dir/file3.txt     > 1
+			[entries[6], 3, 1, { dirs: 90, files: 120 }, 0, 0.3], // 7.   dir/inc/index.js  > 2
+			[entries[8], 3, 1, { dirs: 90, files: 150 }, 0, 0.3], // 8.   dir/src/a.js      > 2
+			[entries[9], 3, 1, { dirs: 90, files: 180 }, 0, 0.3], // 9.   dir/src/b.js      > 2
+		]
+		// ----- write comment to ignore prettier alignment inside the block -------------------------------------
+		db.readDir = async function* () {
+			const sorted = entries
+				.sort((a, b) => {
+					if (a.depth === b.depth) {
+						if (a.isDirectory && !b.isDirectory) return -1
+						if (!a.isDirectory && b.isDirectory) return 1
+					}
+					return a.depth - b.depth
+				})
+			for (const entry of sorted) {
+				yield entry
 			}
+		}
 
-			expect(files.length).toBe(entries.length)
-		})
+		const files = []
+		let i = 0
+		for await (const entry of db.findStream(".", { limit: -1, sort: "name", order: "asc" })) {
+			files.push(entry)
+			const exp = expected[i++]
+			assert.deepEqual(entry.file, exp[0])
+			assert.strictEqual(entry.dirs.size, exp[1])
+			assert.strictEqual(entry.top.size, exp[2])
+			assert.deepEqual(entry.totalSize, exp[3])
+			assert.strictEqual(entry.errors.size, exp[4])
+			assert.ok(Math.abs(entry.progress - exp[5]) < 0.1)
+		}
 
-		it("should respect limit option", async () => {
-			const entries = [
-				new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
-				new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 20, mtime: new Date(2000), mtimeMs: 2000 }), depth: 0 }),
-				new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 30, mtime: new Date(3000), mtimeMs: 3000 }), depth: 0 }),
-			]
-			db.readDir = vi.fn(async function* () {
-				for (const e of entries) {
-					yield e
-				}
-			})
+		assert.strictEqual(files.length, entries.length)
+	})
 
-			const results = []
-			for await (const result of db.findStream(".", { limit: 2 })) {
-				results.push(result)
+	it("should respect limit option", async () => {
+		const entries = [
+			new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
+			new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 20, mtime: new Date(2000), mtimeMs: 2000 }), depth: 0 }),
+			new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 30, mtime: new Date(3000), mtimeMs: 3000 }), depth: 0 }),
+		]
+		db.readDir = async function* () {
+			for (const e of entries) {
+				yield e
 			}
+		}
 
-			expect(results.length).toBe(2)
-		})
+		const results = []
+		for await (const result of db.findStream(".", { limit: 2 })) {
+			results.push(result)
+		}
 
-		it("should sort by mtime desc", async () => {
-			const entries = [
-				new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
-				new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 20, mtime: new Date(3000), mtimeMs: 3000 }), depth: 0 }),
-				new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 30, mtime: new Date(2000), mtimeMs: 2000 }), depth: 0 }),
-			]
-			db.readDir = vi.fn(async function* () {
-				for (const e of entries) {
-					yield e
-				}
-			})
+		assert.strictEqual(results.length, 2)
+	})
 
-			const results = []
-			for await (const result of db.findStream(".", { sort: "mtime", order: "desc" })) {
-				results.push(result)
+	it("should sort by mtime desc", async () => {
+		const entries = [
+			new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
+			new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 20, mtime: new Date(3000), mtimeMs: 3000 }), depth: 0 }),
+			new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 30, mtime: new Date(2000), mtimeMs: 2000 }), depth: 0 }),
+		]
+		db.readDir = async function* () {
+			for (const e of entries) {
+				yield e
 			}
+		}
 
-			const sorted = [...results].sort((a, b) => b.file.stat.mtime - a.file.stat.mtime)
-			expect(results.map(r => r.file.name)).not.toEqual(sorted.map(r => r.file.name))
-		})
+		const results = []
+		for await (const result of db.findStream(".", { sort: "mtime", order: "desc" })) {
+			results.push(result)
+		}
 
-		it("should sort by size asc", async () => {
-			const entries = [
-				new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 30, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
-				new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 10, mtime: new Date(3000), mtimeMs: 3000 }), depth: 0 }),
-				new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 20, mtime: new Date(2000), mtimeMs: 2000 }), depth: 0 }),
-			]
-			db.readDir = vi.fn(async function* () {
-				for (const e of entries) {
-					yield e
-				}
-			})
+		const sorted = [...results].sort((a, b) => b.file.stat.mtime - a.file.stat.mtime)
+		assert.notDeepStrictEqual(results.map(r => r.file.name), sorted.map(r => r.file.name))
+	})
 
-			const results = []
-			for await (const result of db.findStream(".", { sort: "size", order: "asc" })) {
-				results.push(result)
+	it("should sort by size asc", async () => {
+		const entries = [
+			new DocumentEntry({ name: "a.txt", stat: new DocumentStat({ size: 30, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
+			new DocumentEntry({ name: "b.txt", stat: new DocumentStat({ size: 10, mtime: new Date(3000), mtimeMs: 3000 }), depth: 0 }),
+			new DocumentEntry({ name: "c.txt", stat: new DocumentStat({ size: 20, mtime: new Date(2000), mtimeMs: 2000 }), depth: 0 }),
+		]
+		db.readDir = async function* () {
+			for (const e of entries) {
+				yield e
 			}
+		}
 
-			const sorted = [...results].sort((a, b) => a.file.stat.size - b.file.stat.size)
-			expect(results.map(r => r.file.name)).not.toEqual(sorted.map(r => r.file.name))
-		})
+		const results = []
+		for await (const result of db.findStream(".", { sort: "size", order: "asc" })) {
+			results.push(result)
+		}
 
-		it("should handle errors in stat and collect them", async () => {
-			const error = new Error("stat error")
-			const entries = [
-				new DocumentEntry({ name: "a.txt", path: "a.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
-				new DocumentEntry({ name: "b.txt", path: "b.txt", stat: new DocumentStat({ size: 20, mtime: new Date(2000), mtimeMs: 2000, error }), depth: 0 }),
-			]
-			db.readDir = vi.fn(async function* () {
-				for (const e of entries) {
-					yield e
-				}
-			})
+		const sorted = [...results].sort((a, b) => a.file.stat.size - b.file.stat.size)
+		assert.notDeepStrictEqual(results.map(r => r.file.name), sorted.map(r => r.file.name))
+	})
 
-			const results = []
-			for await (const result of db.findStream(".", {})) {
-				results.push(result)
+	it("should handle errors in stat and collect them", async () => {
+		const error = new Error("stat error")
+		const entries = [
+			new DocumentEntry({ name: "a.txt", path: "a.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 0 }),
+			new DocumentEntry({ name: "b.txt", path: "b.txt", stat: new DocumentStat({ size: 20, mtime: new Date(2000), mtimeMs: 2000, error }), depth: 0 }),
+		]
+		db.readDir = async function* () {
+			for (const e of entries) {
+				yield e
 			}
+		}
 
-			expect(results[results.length - 1].errors.has("b.txt")).toBe(true)
-			expect(results[results.length - 1].errors.get("b.txt")).toBe(error)
-		})
+		const results = []
+		for await (const result of db.findStream(".", {})) {
+			results.push(result)
+		}
 
-		it.skip("should throw error if directory parent not found", async () => {
-			const entries = [
-				new DocumentEntry({ name: "file.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 1, parent: "missingDir" }),
-			]
-			db.readDir = vi.fn(async function* () {
-				for (const e of entries) {
-					yield e
-				}
-			})
+		assert.strictEqual(results[results.length - 1].errors.has("b.txt"), true)
+		assert.strictEqual(results[results.length - 1].errors.get("b.txt"), error)
+	})
 
-			const iterator = db.findStream(".", {})
-			await expect(async () => {
-				for await (const _ of iterator) { }
-			}).rejects.toThrow("Directory missingDir not found")
-		})
+	it.skip("should throw error if directory parent not found", async () => {
+		const entries = [
+			new DocumentEntry({ name: "file.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 1, parent: "missingDir" }),
+		]
+		db.readDir = async function* () {
+			for (const e of entries) {
+				yield e
+			}
+		}
+
+		const iterator = db.findStream(".", {})
+		await assert.rejects(async () => {
+			for await (const _ of iterator) { }
+		}, /Directory missingDir not found/)
 	})
 
 })

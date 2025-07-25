@@ -5,26 +5,24 @@
 	"main": "src/index.js",
 	"type": "module",
 	"scripts": {
-		"test": "vitest run"
+		"test": "node --test"
 	},
 	"keywords": [
 		"nanoweb",
 		"database",
 		"fs"
 	],
-	"author": "YaRaSlove [ЯRаСлав]",
+	"author": "YaRaSlove(ЯRаСлав) <support@yaro.page>",
 	"license": "ISC",
 	"packageManager": "pnpm@10.11.0",
 	"devDependencies": {
-		"@nanoweb/types": "link:../types",
-		"@vitest/coverage-v8": "^3.2.4",
-		"vitest": "^3.2.4"
-	},
-	"dependencies": {
 		"@nanoweb/db": "link:../db",
-		"string-width": "^7.2.0"
+		"@nanoweb/types": "link:../types",
+		"nanoweb-fs": "^1.17.7"
 	},
 	"peerDependencies": {
-		"@nanoweb/types": "^1.0.0"
+		"@nanoweb/db": "^1.0.0",
+		"@nanoweb/types": "^1.0.0",
+		"nanoweb-fs": "^1.17.7"
 	}
 }
