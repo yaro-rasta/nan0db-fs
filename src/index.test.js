@@ -1,7 +1,8 @@
-import { suite, it, beforeEach, afterEach } from "node:test"
+import { suite, describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
-import DBFS, { DocumentEntry, DocumentStat } from "./index.js"
 import { stdout } from "node:process"
+import DBFS, { DocumentEntry, DocumentStat } from "./index.js"
+import { sep } from "node:path"
 
 suite("DBFS tests", () => {
 	/** @type {DBFS} */
@@ -58,7 +59,7 @@ suite("DBFS tests", () => {
 			}
 			return true
 		}
-		db.resolve = async (uri) => uri
+		db.resolve = (uri) => uri
 		db.relative = (from, to) => to.startsWith(from) ? to.slice(from.length) : to
 		db.statDocument = async (uri) => {
 			if (!memoryFS.existsSync(uri)) return { mtime: 0, mtimeMs: 0 }
@@ -109,13 +110,12 @@ suite("DBFS tests", () => {
 		memoryFS.clear()
 	})
 
-	it.todo("should resolve async", async () => {
+	it("should resolve async", async () => {
 		const resolved = await db.resolve("file1.txt")
 		assert.strictEqual(resolved, "file1.txt")
 	})
 
-	it.skip("should list files with progress bar during async process", async () => {
-		// @todo render proper progress bar during the allFiles, and total, check what readDir returns to operate with it.
+	it("should list files with progress bar during async process", async () => {
 		let count = 0
 		let total = 0
 		const output = []
@@ -131,7 +131,7 @@ suite("DBFS tests", () => {
 
 		await db.connect()
 		let listedFiles = []
-		let allFiles = []
+		total = files.length
 
 		db.readDir = async function* () {
 			for (const f of files) {
@@ -140,19 +140,13 @@ suite("DBFS tests", () => {
 			}
 		}
 
-		allFiles = []
 		for await (const file of db.readDir(db.root, -1)) {
-			allFiles.push(file)
+			listedFiles.push(file)
 			count++
 			renderProgress()
-			listedFiles.push(file)
 		}
 
 		assert.deepStrictEqual(listedFiles, files)
-
-		// Precise test for progress bar output for every file
-		// We cannot test stdout.write calls easily here, so skipping detailed check
-		// @todo check the output for precise progress bar.
 
 		await db.disconnect()
 	})
@@ -218,4 +212,39 @@ suite("DBFS tests", () => {
 		const result = await db.dropDocument("file1.txt")
 		assert.strictEqual(result, false)
 	})
+
+	it("should return proper extname", () => {
+		const extname = db.extname("file.Txt")
+		assert.strictEqual(extname, ".txt")
+	})
 })
+
+suite("DBFS resolve tests", () => {
+	/** @type {DBFS} */
+	let db
+
+	beforeEach(() => {
+		db = new DBFS({ root: ".", cwd: "." })
+	})
+
+	it("should resolve relative path", () => {
+		const resolved = db.resolve("src/index.test.js")
+		assert.strictEqual(resolved, "src/index.test.js")
+	})
+
+	it("should resolve absolute path", () => {
+		const resolved = db.absolute("index.js")
+		assert.ok(resolved.endsWith(sep + "index.js"))
+	})
+
+	describe("ensureAccess()", () => {
+		it("should prevent access outside of the container", async () => {
+			const uri = "../outside.txt"
+			await assert.rejects(async () => {
+				await db.ensureAccess(uri, "r")
+			}, /No access outside of the db container/)
+		})
+	})
+
+})
+

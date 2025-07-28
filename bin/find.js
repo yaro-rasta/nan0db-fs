@@ -5,9 +5,6 @@ import { extname } from "node:path"
 
 async function main(argv = []) {
 	const root = argv[0] || "."
-	const db = new DBFS({ root })
-	await db.connect()
-
 	/** @type {DocumentEntry[]} */
 	let files = []
 	let prev = []
@@ -22,21 +19,17 @@ async function main(argv = []) {
 		const avgRam = ram.reduce((a, b) => a + b, 0) / ram.length
 		let str = [
 			files.length.toLocaleString(),
-			// "found",
 			"[" + elapsed.toLocaleString(), "ms]",
 			"[" + (entry.totalSize.dirs / 1024 / 1024).toFixed(2), "Mb /",
 			(entry.totalSize.files / 1024 / 1024).toFixed(2), "Mb]",
 			"[" + `${parseInt(avgRam / 1024 / 1024).toLocaleString()}`, "Mb RAM]",
 			"[!" + entry.errors.size + "]",
 			"(" + entry.file.path + ")",
-			// `${(entry.progress * 100).toFixed(2)}%`,
-			// "fulfilled",
 		].join(" ")
 		if (str.length > width) str = str.slice(0, width - 3) + "..."
 		const frame = []
 		frame.push("\r\n" + str + " ".repeat(Math.max(0, String(prev[0] ?? "").trim().length - str.length)))
 		const groupEntries = Object.entries(groups)
-		// const rows = groupEntries.length + 1
 		for (const [name, size] of groupEntries) {
 			frame.push(`\r\n${name}: ${(size / 1024 / 1024).toFixed(2)} Mb     `)
 		}
@@ -55,6 +48,13 @@ async function main(argv = []) {
 		"> 100M": entry => entry.file.stat.size > 100 * 1024 * 1024,
 	}
 	const groupStats = {}
+	/**
+	 * @todo make it work properly to find:
+	 * node bin/find.js /Users/blogger
+	 * node bin/find.js .
+	 */
+	const db = new DBFS({ cwd: root })
+	await db.connect()
 
 	stdout.write("root: " + root + "\n")
 
@@ -70,10 +70,12 @@ async function main(argv = []) {
 		renderProgress(entry, groupStats)
 	}
 
-	const { errors } = files.pop()
-	stdout.write("\n")
-	for (const error of errors) {
-		stdout.write(`${error.file.name}: ${error.message}\n`)
+	if (files.length > 1) {
+		const { errors } = files.pop()
+		stdout.write("\n")
+		for (const error of errors) {
+			stdout.write(`${error.file.name}: ${error.message}\n`)
+		}
 	}
 
 	stdout.write("\nDone.\n")

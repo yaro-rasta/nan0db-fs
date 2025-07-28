@@ -2,6 +2,31 @@
 
 A pure Node.js filesystem database for managing documents and directories with a familiar API. DBFS provides a simple, extensible interface for reading, writing, listing, and managing files and directories, with support for custom loaders and savers, access control, and streaming file discovery.
 
+## Goal
+
+Make all the information as a database, following the `@nan0/db` goals.
+
+Example:
+
+```js
+import DB from "@nan0/db-fs"
+
+const db = new DB()
+db.attach(new DB({ root: "stats/", cwd: "/var/log/stats" }))
+db.attach(new DB({ root: "users/", cwd: "/home" }))
+db.attach(new DB({ root: "/", cwd: "/var/www" }))
+
+const adsStats = await db.loadDocument("/stats/2025/02/16/ads")
+const me = await db.loadDocument("/users/me@gmail.com")
+```
+
+## Mission
+
+NaN0 changes makes the solution.  
+Only `node:test` for testing.  
+Maximum usage of vanila.js and node.js.  
+As simple as possible.
+
 ## Features
 
 - **Filesystem-backed database**: Store and manage documents as files and directories.
@@ -22,7 +47,7 @@ npm install @nanoweb/db
 ### Basic Example
 
 ```js
-import DBFS from "./src/index.js"
+import DBFS from "@nan0/db-fs"
 
 const db = new DBFS({ root: "./data" })
 
@@ -121,5 +146,5 @@ ISC
 
 ## Acknowledgements
 
-- [@nanoweb/db](https://npmjs.com/package/@nanoweb/db)
-- [nanoweb-fs](https://npmjs.com/package/nanoweb-fs)
+- [@nan0/db](https://nan0.yaro.page/db.html)
+- [nanoweb-fs](https://nanoweb.yaro.page/nanoweb-fs.html)

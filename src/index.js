@@ -1,5 +1,5 @@
 import { resolve, extname, relative } from "node:path"
-import { appendFileSync, existsSync, mkdirSync, statSync, readdirSync, unlinkSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, statSync, readdirSync, unlinkSync, rmdirSync } from "node:fs"
 import DB, { DocumentStat, DocumentEntry } from "@nanoweb/db"
 import { load, save } from "nanoweb-fs"
 
@@ -27,22 +27,28 @@ class DBFS extends DB {
 	}
 	/**
 	 * @param {string} uri The URI to get the extension from.
-	 * @returns {string} The extension.
+	 * @returns {string} The extension in lowercase.
 	 */
 	extname(uri) {
-		return extname(uri)
+		return extname(uri).toLowerCase()
 	}
 	/**
-	 * In case of web requests function is async.
 	 * @param {...string} args The arguments to resolve.
-	 * @returns {Promise<string>} The resolved path.
+	 * @returns {Promise<string>} The resolved absolute path.
 	 */
-	async resolve(...args) {
+	resolve(...args) {
+		const root = this.absolute(this.cwd, this.root)
+		const path = this.absolute(...args)
+		return this.relative(root, path)
+	}
+	/**
+	 * Returns the absolute path of the resolved path.
+	 * @param  {...string[]} args The arguments to resolve.
+	 * @return {string} The resolved absolute path.
+	 */
+	absolute(...args) {
 		const root = this.root.endsWith("/") ? this.root.slice(0, -1) : this.root
-		return new Promise((res) => {
-			const result = resolve(...[root, ...args])
-			res(result)
-		})
+		return resolve(...[this.cwd, root, ...args])
 	}
 	/**
 	 * @param {string} from The path to resolve from.
@@ -71,7 +77,8 @@ class DBFS extends DB {
 	 */
 	async statDocument(uri) {
 		const file = await this.resolve(uri)
-		return new DocumentStat(existsSync(file) ? statSync(file) : {})
+		const path = resolve(this.cwd, this.root, file)
+		return new DocumentStat(existsSync(path) ? statSync(path) : {})
 	}
 	/**
 	 * @param {string} uri The URI to load the document from.
@@ -81,8 +88,9 @@ class DBFS extends DB {
 	async loadDocument(uri, defaultValue = "") {
 		await this.ensureAccess(uri, "r")
 		const file = await this.resolve(uri)
-		if (!existsSync(file)) return defaultValue
-		return load(file)
+		const path = resolve(this.cwd, this.root, file)
+		if (!existsSync(path)) return defaultValue
+		return load(path)
 	}
 	/**
 	 * @param {string} uri The URI to build the path for.
@@ -90,7 +98,8 @@ class DBFS extends DB {
 	 */
 	async _buildPath(uri) {
 		const dir = await this.resolve(uri, "..")
-		mkdirSync(dir, { recursive: true })
+		const path = resolve(this.cwd, this.root, dir)
+		mkdirSync(path, { recursive: true })
 	}
 	/**
 	 * @throws {Error} If the document cannot be saved.
@@ -102,9 +111,15 @@ class DBFS extends DB {
 		await this.ensureAccess(uri, "w")
 		await this._buildPath(uri)
 		const file = await this.resolve(uri)
+		const path = resolve(this.cwd, this.root, file)
 		const ext = this.extname(uri)
 		for (const saver of this.savers) {
-			if (false !== saver(file, document, ext)) return true
+			if (false !== saver(path, document, ext)) {
+				const stat = await this.statDocument(uri)
+				this.meta.set(uri, stat)
+				this.data.set(uri, false)
+				return true
+			}
 		}
 		return false
 	}
@@ -118,7 +133,8 @@ class DBFS extends DB {
 		await this.ensureAccess(uri, "w")
 		await this._buildPath(uri)
 		const file = await this.resolve(uri)
-		appendFileSync(file, chunk, this.encoding)
+		const path = resolve(this.cwd, this.root, file)
+		appendFileSync(path, chunk, this.encoding)
 		return true
 	}
 	/**
@@ -131,19 +147,33 @@ class DBFS extends DB {
 		const file = await this.resolve(uri)
 		let stat = await this.statDocument(uri)
 		if (!stat.exists) return false
-		unlinkSync(file)
+		const path = resolve(this.cwd, this.root, file)
+		if (stat.isDirectory) {
+			const nested = Array.from(this.meta.keys()).filter(u => u.startsWith(file + "/")).length
+			if (nested > 0) {
+				throw new Error("Directory has children, delete them first")
+			}
+			rmdirSync(path)
+			this.meta.delete(file)
+			this.data.delete(file)
+			return true
+		}
+		unlinkSync(path)
 		stat = await this.statDocument(uri)
+		if (!stat.exists) {
+			this.data.delete(file)
+			this.meta.delete(file)
+		}
 		return !stat.exists
 	}
 	async ensureAccess(uri, level = "r") {
 		await super.ensureAccess(uri, level)
 		const path = await this.resolve(uri)
-		const rel = this.relative(this.root, path)
 		if (uri.endsWith("/llm.config.js")) {
 			/** @note load config file from anywhere */
 			return true
 		}
-		if (rel.startsWith("..")) {
+		if (path.startsWith("..")) {
 			throw new Error("No access outside of the db container")
 		}
 		return true
@@ -152,7 +182,7 @@ class DBFS extends DB {
 	async listDir(uri, { depth = 0, skipStat = false } = {}) {
 		const path = resolve(this.root, uri)
 		const entries = readdirSync(path, { withFileTypes: true })
-		return entries.map((entry) => {
+		const files = entries.map((entry) => {
 			let stat = entry
 			if (!skipStat) {
 				try {
@@ -167,6 +197,8 @@ class DBFS extends DB {
 				depth,
 			})
 		})
+		files.sort((a, b) => Number(b.stat.isDirectory()) - Number(a.stat.isDirectory()))
+		return files
 	}
 }
 
