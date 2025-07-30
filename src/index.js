@@ -1,14 +1,15 @@
-import { resolve, extname, relative } from "node:path"
+import { resolve, extname, relative, sep } from "node:path"
 import { appendFileSync, existsSync, mkdirSync, statSync, readdirSync, unlinkSync, rmdirSync } from "node:fs"
 import DB, { DocumentStat, DocumentEntry } from "@nanoweb/db"
-import { load, save } from "nanoweb-fs"
+import { load, loadFile, save } from "nanoweb-fs"
 
 class DBFS extends DB {
 	/**
 	 * @type {((file: string, data: any, ext: string) => any)[]}
 	 */
 	loaders = [
-		(file, data) => load(file, data),
+		(file, ext) => ".txt" === ext ? loadFile(file, "") : false,
+		(file) => load(file),
 	]
 	/**
 	 * @type {((file: string, data: any, ext: string) => any)[]}
@@ -37,7 +38,7 @@ class DBFS extends DB {
 	 * @returns {Promise<string>} The resolved absolute path.
 	 */
 	resolve(...args) {
-		const root = this.absolute(this.cwd, this.root)
+		const root = this.absolute()
 		const path = this.absolute(...args)
 		return this.relative(root, path)
 	}
@@ -48,7 +49,7 @@ class DBFS extends DB {
 	 */
 	absolute(...args) {
 		const root = this.root.endsWith("/") ? this.root.slice(0, -1) : this.root
-		return resolve(...[this.cwd, root, ...args])
+		return DBFS.winFix(resolve(...[this.cwd, root, ...args]))
 	}
 	/**
 	 * @param {string} from The path to resolve from.
@@ -56,7 +57,7 @@ class DBFS extends DB {
 	 * @returns {string} The relative path.
 	 */
 	relative(from, to) {
-		return relative(from, to)
+		return DBFS.winFix(relative(from, to))
 	}
 	/**
 	 * Returns the stat of the document, uses meta (cache) if available.
@@ -90,7 +91,14 @@ class DBFS extends DB {
 		const file = await this.resolve(uri)
 		const path = resolve(this.cwd, this.root, file)
 		if (!existsSync(path)) return defaultValue
-		return load(path)
+		const ext = this.extname(uri)
+		for (const loader of this.loaders) {
+			const res = loader(path, ext)
+			if (false !== res) {
+				return res
+			}
+		}
+		return false
 	}
 	/**
 	 * @param {string} uri The URI to build the path for.
@@ -199,6 +207,10 @@ class DBFS extends DB {
 		})
 		files.sort((a, b) => Number(b.stat.isDirectory()) - Number(a.stat.isDirectory()))
 		return files
+	}
+
+	static winFix(path) {
+		return "/" === sep ? path : path.replaceAll(sep, "/")
 	}
 }
 
