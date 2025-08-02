@@ -287,22 +287,7 @@ suite("findStream()", () => {
 		assert.strictEqual(results[results.length - 1].errors.get("b.txt"), error)
 	})
 
-	it.todo("should throw error if directory parent not found", async () => {
-		const entries = [
-			new DocumentEntry({ name: "file.txt", stat: new DocumentStat({ size: 10, mtime: new Date(1000), mtimeMs: 1000 }), depth: 1, parent: "missingDir" }),
-		]
-		db.readDir = async function* () {
-			for (const e of entries) {
-				yield e
-			}
-		}
-		const iterator = db.findStream(".", {})
-		await assert.rejects(async () => {
-			for await (const _ of iterator) { }
-		}, /Directory missingDir not found/)
-	})
-
-	it.skip("should throw error if directory parent not found", async () => {
+	it("should throw error if directory parent not found", async () => {
 		const entries = [
 			new DocumentEntry({ name: "file.txt", path: "missingDir/file.txt", stat: new DocumentStat({ size: 10, mtimeMs: 1000 }), depth: 1, parent: "missingDir" }),
 		]
@@ -314,7 +299,101 @@ suite("findStream()", () => {
 		const iterator = db.findStream(".")
 		await assert.rejects(async () => {
 			for await (const _ of iterator) { }
-		}, /Directory parent not found/)
+		}, /Error: Directory not found: missingDir/)
 	})
 
+	it("should correctly handle findStream root directory scan", async () => {
+		const entries = [
+			new DocumentEntry({ name: ".", path: ".", stat: new DocumentStat({ isDirectory: true }), depth: 0 }),
+			new DocumentEntry({ name: "file1.txt", path: "file1.txt", stat: new DocumentStat({ size: 10, mtimeMs: 1000 }), depth: 0 }),
+			new DocumentEntry({ name: "dir", path: "dir", stat: new DocumentStat({ isDirectory: true }), depth: 0 }),
+			new DocumentEntry({ name: "dir/file2.txt", path: "dir/file2.txt", stat: new DocumentStat({ size: 20, mtimeMs: 2000 }), depth: 1 }),
+		]
+		db.readDir = async function* () {
+			for (const e of entries) {
+				yield e
+			}
+		}
+
+		const results = []
+		for await (const entry of db.findStream(".", { limit: -1 })) {
+			results.push(entry)
+		}
+
+		// Filter out the root entry (.) which is typically not returned in the results
+		const filteredResults = results.filter(r => r.file.name !== ".")
+		assert.strictEqual(filteredResults.length, 3)
+		assert.ok(filteredResults.some(r => r.file.name === "file1.txt"))
+		assert.ok(filteredResults.some(r => r.file.name === "dir"))
+		assert.ok(filteredResults.some(r => r.file.name === "dir/file2.txt"))
+	})
+
+	it("should handle nested directories correctly with findStream", async () => {
+		const entries = [
+			new DocumentEntry({ name: "dir", path: "dir", stat: new DocumentStat({ isDirectory: true }), depth: 0 }),
+			new DocumentEntry({ name: "dir/nested", path: "dir/nested", stat: new DocumentStat({ isDirectory: true }), depth: 1 }),
+			new DocumentEntry({ name: "dir/nested/deep.txt", path: "dir/nested/deep.txt", stat: new DocumentStat({ size: 50, mtimeMs: 5000 }), depth: 2 }),
+			new DocumentEntry({ name: "dir/file.txt", path: "dir/file.txt", stat: new DocumentStat({ size: 30, mtimeMs: 3000 }), depth: 1 }),
+		]
+		db.readDir = async function* () {
+			for (const e of entries) {
+				yield e
+			}
+		}
+
+		const results = []
+		for await (const entry of db.findStream(".")) {
+			results.push(entry)
+		}
+
+		// Check that we have 3 non-directory entries (the actual files)
+		const fileResults = results.filter(r => !r.file.stat.isDirectory)
+		assert.strictEqual(fileResults.length, 2)
+		assert.ok(fileResults.some(r => r.file.name === "dir/file.txt"))
+		assert.ok(fileResults.some(r => r.file.name === "dir/nested/deep.txt"))
+
+		// Check that we have 2 directory entries
+		const dirResults = results.filter(r => r.file.stat.isDirectory)
+		assert.strictEqual(dirResults.length, 2)
+		assert.ok(dirResults.some(r => r.file.name === "dir"))
+		assert.ok(dirResults.some(r => r.file.name === "dir/nested"))
+	})
+
+	it("should handle mixed content types in findStream", async () => {
+		const entries = [
+			new DocumentEntry({ name: "data.json", path: "data.json", stat: new DocumentStat({ size: 100, mtimeMs: 1000 }), depth: 0 }),
+			new DocumentEntry({ name: "style.css", path: "style.css", stat: new DocumentStat({ size: 200, mtimeMs: 2000 }), depth: 0 }),
+			new DocumentEntry({ name: "index.html", path: "index.html", stat: new DocumentStat({ size: 300, mtimeMs: 3000 }), depth: 0 }),
+			new DocumentEntry({ name: "script.js", path: "script.js", stat: new DocumentStat({ size: 150, mtimeMs: 1500 }), depth: 0 }),
+			new DocumentEntry({ name: "dir", path: "dir", stat: new DocumentStat({ isDirectory: true }), depth: 0 }),
+			new DocumentEntry({ name: "dir/image.png", path: "dir/image.png", stat: new DocumentStat({ size: 500, mtimeMs: 5000 }), depth: 1 }),
+		]
+		db.readDir = async function* () {
+			// Sort entries by size for this test
+			const sortedEntries = [...entries].sort((a, b) => {
+				// Directories should come first in the sorted list
+				if (a.stat.isDirectory && !b.stat.isDirectory) return -1
+				if (!a.stat.isDirectory && b.stat.isDirectory) return 1
+				// For files, sort by size
+				if (!a.stat.isDirectory && !b.stat.isDirectory) {
+					return a.stat.size - b.stat.size
+				}
+				// For directories, keep original order or sort by name
+				return a.name.localeCompare(b.name)
+			})
+			for (const e of sortedEntries) {
+				yield e
+			}
+		}
+
+		const results = []
+		for await (const entry of db.findStream(".", { sort: "size", order: "asc" })) {
+			results.push(entry)
+		}
+
+		// Get only the file entries for size comparison
+		const fileResults = results.filter(r => !r.file.stat.isDirectory).map(r => r.file)
+		const expectedFileOrder = ["data.json", "script.js", "style.css", "index.html", "dir/image.png"]
+		assert.deepStrictEqual(fileResults.map(f => f.name), expectedFileOrder)
+	})
 })
