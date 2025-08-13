@@ -3,6 +3,9 @@ import assert from "node:assert/strict"
 import DBFS from "./index.js"
 import path, { sep } from "node:path"
 
+/**
+ * @desc Tests the complete file lifecycle: save, load, write, drop.
+ */
 suite("File lifecycle tests", () => {
 	/** @type {DBFS} */
 	let db
@@ -50,7 +53,6 @@ suite("File lifecycle tests", () => {
 	})
 
 	it("should build directory structure automatically", async () => {
-		// await db.writeDocument("modules/utils/handlers/validator.js", "dummy content")
 		await db.saveDocument("modules/utils/handlers/validator.js", "const a = 'dummy content'")
 
 		const files = Array.from(db.meta.keys()).sort()
@@ -82,7 +84,6 @@ suite("File lifecycle tests", () => {
 
 		const resolved = await db.resolve("data/file.json")
 		const abs = db.absolute("data/file.json")
-		// assert.strictEqual(resolved, "testfs/data/file.json", "Should maintain correct root prefix in all operations")
 		assert.ok(abs.endsWith("/testfs/data/file.json"))
 	})
 })

@@ -39,7 +39,7 @@ As simple as possible.
 ## Installation
 
 ```bash
-npm install @nanoweb/db
+npm install @nan0web/db
 ```
 
 ## Usage

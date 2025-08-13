@@ -36,6 +36,9 @@ class TestEntry {
 	}
 }
 
+/**
+ * @desc Tests the findStream functionality for scanning directories.
+ */
 suite("findStream()", () => {
 	/** @type {DBFS} */
 	let db
@@ -186,17 +189,9 @@ suite("findStream()", () => {
 		const files = []
 		let i = 0
 		for await (const entry of db.findStream(".", { limit: -1, sort: "name", order: "asc" })) {
-			// files.push(entry)
 			files.push([
 				entry.file, entry.dirs.size, entry.top.size, entry.totalSize, entry.errors.size, entry.progress
 			])
-			// const exp = expected[i++]
-			// assert.deepEqual(entry.file, exp[0])
-			// assert.strictEqual(entry.dirs.size, exp[1])
-			// assert.strictEqual(entry.top.size, exp[2])
-			// assert.deepEqual(entry.totalSize, exp[3])
-			// assert.strictEqual(entry.errors.size, exp[4])
-			// assert.ok(Math.abs(entry.progress - exp[5]) < 0.1)
 		}
 		const a = files.map(el => new TestEntry([ el[0], el[1], el[2] ]))
 		const b = expected.map(el => new TestEntry([ el[0], el[1], el[2] ]))

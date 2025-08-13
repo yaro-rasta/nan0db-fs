@@ -4,6 +4,9 @@ import { stdout } from "node:process"
 import DBFS, { DocumentEntry, DocumentStat } from "./index.js"
 import { sep } from "node:path"
 
+/**
+ * @desc Tests the basic functionality of DBFS.
+ */
 suite("DBFS tests", () => {
 	/** @type {DBFS} */
 	let db
@@ -219,6 +222,9 @@ suite("DBFS tests", () => {
 	})
 })
 
+/**
+ * @desc Tests the resolve functionality of DBFS.
+ */
 suite("DBFS resolve tests", () => {
 	/** @type {DBFS} */
 	let db
@@ -227,8 +233,8 @@ suite("DBFS resolve tests", () => {
 		db = new DBFS({ root: ".", cwd: "." })
 	})
 
-	it("should resolve relative path", () => {
-		const resolved = db.resolve("src/index.test.js")
+	it("should resolve relative path", async () => {
+		const resolved = await db.resolve("src/index.test.js")
 		assert.strictEqual(resolved, "src/index.test.js")
 	})
 
@@ -247,4 +253,3 @@ suite("DBFS resolve tests", () => {
 	})
 
 })
-

@@ -2,6 +2,9 @@ import { suite, it, beforeEach } from "node:test"
 import assert from "node:assert/strict"
 import DBFS from "./index.js"
 
+/**
+ * @desc Tests the asynchronous path resolution in DBFS.
+ */
 suite("DBFS async resolve tests", () => {
 	/** @type {DBFS} */
 	let db
@@ -14,8 +17,8 @@ suite("DBFS async resolve tests", () => {
 		const resolved = await db.resolve("file1.txt")
 		assert.strictEqual(resolved, "file1.txt")
 	})
-	it("should not resolve return promise anymore", () => {
+	it("should resolve return promise", () => {
 		const resolved = db.resolve("file1.txt")
-		assert.ok(!(resolved instanceof Promise))
+		assert.ok(resolved instanceof Promise)
 	})
 })
